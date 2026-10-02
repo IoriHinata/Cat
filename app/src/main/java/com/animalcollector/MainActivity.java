@@ -29,6 +29,8 @@ public final class MainActivity extends ComponentActivity {
 
     private WebView webView;
     private boolean captureAfterPermission;
+    private final ActivityResultLauncher<Void> cameraCapture = registerForActivityResult(
+            new ActivityResultContracts.TakePicturePreview(), this::publishBitmap);
     private final ActivityResultLauncher<String> cameraPermission = registerForActivityResult(
             new ActivityResultContracts.RequestPermission(), granted -> {
                 sendCameraPermission(granted);
@@ -37,8 +39,6 @@ public final class MainActivity extends ComponentActivity {
                     cameraCapture.launch(null);
                 }
             });
-    private final ActivityResultLauncher<Void> cameraCapture = registerForActivityResult(
-            new ActivityResultContracts.TakePicturePreview(), this::publishBitmap);
     private final ActivityResultLauncher<String> galleryPicker = registerForActivityResult(
             new ActivityResultContracts.GetContent(), this::publishUri);
 
