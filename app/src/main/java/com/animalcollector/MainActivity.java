@@ -7,10 +7,11 @@ import android.webkit.JavascriptInterface;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
 import android.webkit.WebView;
+import android.widget.TextView;
 
 import androidx.activity.result.ActivityResultLauncher;
 import androidx.activity.result.contract.ActivityResultContracts;
-import androidx.appcompat.app.AppCompatActivity;
+import androidx.activity.ComponentActivity;
 import androidx.core.content.ContextCompat;
 import androidx.webkit.WebViewAssetLoader;
 import androidx.webkit.WebViewClientCompat;
@@ -19,7 +20,7 @@ import androidx.webkit.WebViewClientCompat;
  * Deliberately thin Android host. UI and game state are local WebView assets;
  * this activity owns lifecycle, Android permissions, and asset publication only.
  */
-public final class MainActivity extends AppCompatActivity {
+public final class MainActivity extends ComponentActivity {
     private static final String ASSET_HOST = "appassets.androidplatform.net";
     private static final String APP_URL = "https://appassets.androidplatform.net/assets/index.html";
 
@@ -31,9 +32,21 @@ public final class MainActivity extends AppCompatActivity {
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
 
+        try {
+            createWebView();
+        } catch (RuntimeException exception) {
+            // A broken system WebView must not turn into an unhandled process crash.
+            TextView errorView = new TextView(this);
+            errorView.setText(R.string.webview_unavailable);
+            errorView.setPadding(48, 48, 48, 48);
+            setContentView(errorView);
+        }
+    }
+
+    private void createWebView() {
         WebViewAssetLoader assetLoader = new WebViewAssetLoader.Builder()
-                .addPathHandler("/assets/", new WebViewAssetLoader.AssetsPathHandler(this))
-                .build();
+            .addPathHandler("/assets/", new WebViewAssetLoader.AssetsPathHandler(this))
+            .build();
 
         webView = new WebView(this);
         webView.getSettings().setJavaScriptEnabled(true);
