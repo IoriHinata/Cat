@@ -1,0 +1,9 @@
+:root { color-scheme: dark; font-family: system-ui, sans-serif; background: #0d1d28; color: #eff8ff; }
+body { margin: 0; } .app { max-width: 680px; margin: auto; padding: 24px; }
+header { display: flex; align-items: center; gap: 14px; } header span { font-size: 3rem; } h1, h2, p { margin: 0; }
+#status { color: #a7c8de; margin-top: 4px; } .hero, form, section { margin-top: 20px; padding: 18px; border-radius: 18px; background: #18364a; }
+.hero strong, .hero small { display: block; margin-top: 8px; } .hero strong { font-size: 1.6rem; }
+.actions { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; margin-top: 18px; }
+button { border: 0; border-radius: 12px; padding: 14px; font: inherit; font-weight: 700; background: #7b61ff; color: white; } button.secondary { background: #31566c; }
+label, input { display: block; width: 100%; box-sizing: border-box; } input { margin: 8px 0 12px; padding: 12px; border-radius: 8px; border: 1px solid #84a9c0; font: inherit; }
+ul { padding-left: 20px; } #error { white-space: pre-wrap; color: #ffd5d5; background: #552a2a; padding: 14px; border-radius: 12px; }
