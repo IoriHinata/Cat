@@ -1,8 +1,11 @@
 package com.animalcollector;
 
 import android.Manifest;
+import android.graphics.Bitmap;
+import android.net.Uri;
 import android.content.pm.PackageManager;
 import android.os.Bundle;
+import android.util.Base64;
 import android.webkit.JavascriptInterface;
 import android.webkit.WebResourceRequest;
 import android.webkit.WebResourceResponse;
@@ -25,8 +28,19 @@ public final class MainActivity extends ComponentActivity {
     private static final String APP_URL = "https://appassets.androidplatform.net/assets/index.html";
 
     private WebView webView;
+    private boolean captureAfterPermission;
+    private final ActivityResultLauncher<Void> cameraCapture = registerForActivityResult(
+            new ActivityResultContracts.TakePicturePreview(), this::publishBitmap);
     private final ActivityResultLauncher<String> cameraPermission = registerForActivityResult(
-            new ActivityResultContracts.RequestPermission(), this::sendCameraPermission);
+            new ActivityResultContracts.RequestPermission(), granted -> {
+                sendCameraPermission(granted);
+                if (granted && captureAfterPermission) {
+                    captureAfterPermission = false;
+                    cameraCapture.launch(null);
+                }
+            });
+    private final ActivityResultLauncher<String> galleryPicker = registerForActivityResult(
+            new ActivityResultContracts.GetContent(), this::publishUri);
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -90,6 +104,55 @@ public final class MainActivity extends ComponentActivity {
         }
     }
 
+    private void takePhoto() {
+        boolean granted = ContextCompat.checkSelfPermission(this, Manifest.permission.CAMERA)
+                == PackageManager.PERMISSION_GRANTED;
+        if (granted) {
+            cameraCapture.launch(null);
+        } else {
+            captureAfterPermission = true;
+            cameraPermission.launch(Manifest.permission.CAMERA);
+        }
+    }
+
+    private void pickPhoto() {
+        galleryPicker.launch("image/*");
+    }
+
+    private void publishUri(Uri uri) {
+        if (uri == null) {
+            publishPhoto(null);
+            return;
+        }
+        try {
+            Bitmap bitmap = android.provider.MediaStore.Images.Media.getBitmap(getContentResolver(), uri);
+            publishBitmap(bitmap);
+        } catch (Exception exception) {
+            publishPhoto(null);
+        }
+    }
+
+    private void publishBitmap(Bitmap bitmap) {
+        if (bitmap == null) {
+            publishPhoto(null);
+            return;
+        }
+        try {
+            java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 82, bytes);
+            publishPhoto("data:image/jpeg;base64," + Base64.encodeToString(bytes.toByteArray(), Base64.NO_WRAP));
+        } catch (RuntimeException exception) {
+            publishPhoto(null);
+        }
+    }
+
+    private void publishPhoto(String dataUrl) {
+        if (webView != null) {
+            String argument = dataUrl == null ? "null" : "'" + dataUrl + "'";
+            webView.evaluateJavascript("window.onNativePhoto(" + argument + ");", null);
+        }
+    }
+
     private void sendCameraPermission(boolean granted) {
         if (webView != null) {
             webView.evaluateJavascript("window.onNativeCameraPermission(" + granted + ");", null);
@@ -101,6 +164,16 @@ public final class MainActivity extends ComponentActivity {
         @JavascriptInterface
         public void requestCameraPermission() {
             runOnUiThread(MainActivity.this::requestCameraPermission);
+        }
+
+        @JavascriptInterface
+        public void takePhoto() {
+            runOnUiThread(MainActivity.this::takePhoto);
+        }
+
+        @JavascriptInterface
+        public void pickPhoto() {
+            runOnUiThread(MainActivity.this::pickPhoto);
         }
     }
 }
