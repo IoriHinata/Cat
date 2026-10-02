@@ -1,98 +1,39 @@
 "use strict";
-
-const status = document.querySelector("#status");
-const errorBox = document.querySelector("#error");
-let pyodide;
-
-function showError(stage, error) {
-  const detail = error instanceof Error ? error.message : String(error);
-  errorBox.hidden = false;
-  errorBox.textContent = `Ошибка: ${stage}.\n${detail}`;
-  status.textContent = "Движок недоступен";
-  console.error(stage, error);
-}
-
-// The only JS ↔ Python adapter. Arguments and return values are JSON strings.
-async function callPython(name, ...args) {
-  let fn;
-  let result;
-  try {
-    fn = pyodide.globals.get(name);
-    if (!fn) throw new Error(`Python API '${name}' не экспортирован`);
-    result = await fn(...args);
-    return typeof result === "string" ? result : result.toString();
-  } catch (error) {
-    showError(`вызов Python-функции ${name}`, error);
-    throw error;
-  } finally {
-    // Pyodide globals and non-primitive return values are PyProxy objects.
-    // Release them after converting the JSON response to avoid leaking proxies.
-    if (result && typeof result.destroy === "function") result.destroy();
-    if (fn && typeof fn.destroy === "function") fn.destroy();
-  }
-}
-
-function parseState(json) {
-  try { return JSON.parse(json); }
-  catch (error) { showError("десериализация JSON состояния", error); throw error; }
-}
-
-function render(state) {
-  document.querySelector("#profile").textContent = state.profile;
-  document.querySelector("#profile-name").value = state.profile;
-  document.querySelector("#points").textContent = `${state.points} Points`;
-  document.querySelector("#level").textContent = `Уровень ${state.level}`;
-  document.querySelector("#cards").replaceChildren(...state.cards.map((card) => {
-    const item = document.createElement("li"); item.textContent = `${card.name} · ${card.species}`; return item;
-  }));
-}
-
-async function persistState() {
-  try {
-    localStorage.setItem("animal-collector-state", await callPython("export_state"));
-  } catch (_) { /* The bridge already displays the stage-specific error. */ }
-}
-
-async function dispatch(action) {
-  render(parseState(await callPython("dispatch", JSON.stringify(action))));
-  await persistState();
-}
-
-window.onNativeCameraPermission = (granted) => {
-  status.textContent = granted ? "Камера разрешена Android" : "Доступ к камере не предоставлен";
-};
-
-async function boot() {
-  try {
-    status.textContent = "Загрузка Pyodide…";
-    pyodide = await loadPyodide({ indexURL: "https://cdn.jsdelivr.net/pyodide/v0.27.0/full/" });
-  } catch (error) { showError("загрузка Pyodide", error); return; }
-  let source;
-  try {
-    status.textContent = "Получение Python-исходника…";
-    const response = await fetch("engine.py");
-    if (!response.ok) throw new Error(`engine.py: HTTP ${response.status}`);
-    source = await response.text();
-  } catch (error) { showError("получение Python-исходника", error); return; }
-  try {
-    status.textContent = "Runtime-компиляция Python…";
-    await pyodide.runPythonAsync(source);
-  } catch (error) { showError("runtime-компиляция и исполнение Python", error); return; }
-  try {
-    const saved = localStorage.getItem("animal-collector-state") || "{}";
-    render(parseState(await callPython("initialize", saved)));
-    document.querySelector("#game").hidden = false;
-    status.textContent = "Готово: Python работает в Pyodide";
-  } catch (_) { return; }
-}
-
-document.querySelector("#add-card").addEventListener("click", () => dispatch({ type: "add_mock_card" }));
-document.querySelector("#profile-form").addEventListener("submit", (event) => { event.preventDefault(); dispatch({ type: "rename_profile", name: document.querySelector("#profile-name").value }); });
-document.querySelector("#camera").addEventListener("click", () => {
-  if (window.NativeDevice) window.NativeDevice.requestCameraPermission();
-  else status.textContent = "Android API камеры доступен только внутри приложения";
-});
-window.addEventListener("pagehide", async () => {
-  await persistState();
-});
-boot();
+const status=document.querySelector("#status"), errorBox=document.querySelector("#error"), view=document.querySelector("#view"), nav=document.querySelector("#nav");
+let pyodide,state,page="home",pendingImage="",recognition=[],pendingSource="";
+const esc=(v)=>String(v??"").replace(/[&<>'"]/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;","'":"&#39;",'"':"&quot;"}[c]));
+const rankName=(rank)=>({COMMON:"Обычный",UNCOMMON:"Необычный",RARE:"Редкий",EPIC:"Эпический",LEGENDARY:"Легендарный"}[rank]||rank);
+const rankPaws=(rank)=>({COMMON:20,UNCOMMON:45,RARE:90,EPIC:180,LEGENDARY:360}[rank]||0);
+function message(text){errorBox.hidden=false;errorBox.textContent=text;setTimeout(()=>errorBox.hidden=true,5500)}
+function showError(stage,error){console.error(stage,error);message(stage==="recognition"?"Не удалось распознать фотографию. Попробуйте ещё раз.":"Не удалось выполнить действие. Проверьте данные и попробуйте снова.");}
+async function callPython(name,...args){let fn,result;try{fn=pyodide.globals.get(name);if(!fn)throw Error("API unavailable");result=await fn(...args);return typeof result==="string"?result:result.toString()}finally{if(result?.destroy)result.destroy();if(fn?.destroy)fn.destroy()}}
+const parse=(value)=>JSON.parse(value);
+async function persist(){localStorage.setItem("animal-collector-state",await callPython("export_state"))}
+async function action(value){try{state=parse(await callPython("dispatch",JSON.stringify(value)));await persist();render();return true}catch(e){showError("action",e);return false}}
+function navButton(key,label){return `<button data-page="${key}" class="${page===key?"active":""}">${label}</button>`}
+function cardTile(card){return `<button class="card-item ${card.rarity}" data-card="${card.id}" aria-label="Открыть карточку ${esc(card.name)}">${card.image?`<img src="${esc(card.image)}" alt="${esc(card.name)}">`:`<div class="photo">🐾</div>`}<div><b>${esc(card.name)}</b><br><span class="rarity">${rankName(card.rarity)} · ${card.score}</span><br><small>${esc(card.species)}</small></div></button>`}
+function home(){return `<section class="card hero"><h2>Добро пожаловать, ${esc(state.profile)}</h2><p class="muted">Исследователь, уровень ${state.level} · ${state.xp_in_level}/100 XP до следующего</p><div class="metrics"><div class="metric"><small>Лапки</small><b>${state.points}</b></div><div class="metric"><small>Карточек</small><b>${state.statistics.total}</b></div><div class="metric"><small>Уровень</small><b>${state.level}</b></div></div><div class="actions"><button data-capture="camera">📷 СФОТОГРАФИРОВАТЬ</button><button class="secondary" data-capture="gallery">🖼 ВЫБРАТЬ ФОТО</button></div><p class="muted">Загрузки сегодня: ${state.gallery_day===today()?state.gallery_count:0}/2</p></section><section class="panel"><h2>Продолжайте исследование</h2><p class="muted">Фотографируйте животных, создавайте уникальные карточки и пополняйте альбомы.</p></section>`}
+const today=()=>new Date().toISOString().slice(0,10);
+function collection(){return `<section class="panel"><h2>МОЯ КОЛЛЕКЦИЯ</h2><div class="actions"><input id="search" placeholder="Поиск по имени" aria-label="Поиск по имени"><select id="sort" aria-label="Сортировка"><option value="date">По дате</option><option value="score">По score</option><option value="name">По названию</option><option value="rarity">По редкости</option></select></div><div class="actions"><select id="category" aria-label="Категория"><option>Все</option>${["Кошки","Собаки","Птицы","Дикие животные","Насекомые","Другие"].map(x=>`<option>${x}</option>`).join("")}</select><select id="rarity" aria-label="Редкость"><option>Все ранги</option>${["COMMON","UNCOMMON","RARE","EPIC","LEGENDARY"].map(x=>`<option>${x}</option>`).join("")}</select></div><div id="card-grid" class="grid"></div></section>`}
+function fillCollection(){let cards=[...state.cards],q=(document.querySelector("#search")?.value||"").toLowerCase(),cat=document.querySelector("#category")?.value,rar=document.querySelector("#rarity")?.value,sort=document.querySelector("#sort")?.value;if(q)cards=cards.filter(c=>c.name.toLowerCase().includes(q));if(cat&&cat!=="Все")cards=cards.filter(c=>c.category===cat);if(rar&&rar!=="Все ранги")cards=cards.filter(c=>c.rarity===rar);cards.sort((a,b)=>sort==="score"?b.score-a.score:sort==="name"?a.name.localeCompare(b.name):sort==="rarity"?["LEGENDARY","EPIC","RARE","UNCOMMON","COMMON"].indexOf(a.rarity)-["LEGENDARY","EPIC","RARE","UNCOMMON","COMMON"].indexOf(b.rarity):b.created_at-a.created_at);document.querySelector("#card-grid").innerHTML=cards.length?cards.map(cardTile).join(""):`<div class="empty"><h3>Коллекция пуста</h3><p class="muted">Сфотографируйте первое животное, чтобы получить первую карточку.</p><button data-capture="camera">СФОТОГРАФИРОВАТЬ</button></div>`}
+function bag(){return `<section class="panel"><h2>СУМКА</h2><p class="muted">Карточки вне сумки не удаляются: защитите их или освободите место до истечения срока.</p>${state.bag.map(x=>`<div class="row"><span><b>${rankName(x.rarity)}</b><br><small>${x.used} / ${x.capacity} · свободно ${x.capacity-x.used}</small></span><button class="secondary" data-slot="${x.rarity}">+ место · ${rankPaws(x.rarity)*2} лапок</button></div>`).join("")}<h3>Вне сумки</h3>${state.cards.filter(c=>c.state==="OUT_OF_BAG").map(c=>`<div class="row"><span>⚠️ <b>${esc(c.name)}</b><br><small>До потери: ${remaining(c.expires_at)}</small></span>${c.protected?"<b>🛡 ЗАЩИЩЕНА</b>":`<button data-protect="${c.id}">ЗАЩИТИТЬ · 40 лапок</button>`}</div>`).join("")||"<p class=muted>Все карточки размещены в сумке.</p>"}</section>`}
+function remaining(time){let m=Math.max(0,Math.ceil((time-Date.now())/60000));return `${Math.floor(m/60)} ч ${m%60} мин`}
+function progress(title,items){return `<section class="panel"><h2>${title}</h2>${items.map(x=>`<div class="row"><span><b>${esc(x.name)}</b><br><small>${esc(x.description||"")} · ${x.progress}/${x.target}</small></span>${x.done?(x.claimed?"✅ Получено":`<button data-claim="${esc(x.name)}">Забрать ${x.reward} лапок</button>`):x.reward?`<span>+${x.reward} лапок</span>`:""}</div>`).join("")}</section>`}
+function statistics(){let s=state.statistics;return `<section class="panel"><h2>СТАТИСТИКА</h2>${[["Всего карточек",s.total],["Уникальные виды",s.species],["Уникальные породы",s.breeds],["Уникальные окрасы",s.colors],["Максимальный score",s.max_score],["Уровень",state.level],["Обменов",s.trades],["Потерянные карточки",s.lost],["Защищённые карточки",s.protected]].map(x=>`<div class=row><span>${x[0]}</span><b>${x[1]}</b></div>`).join("")}</section>`}
+function settings(){let x=state.settings;return `<section class=panel><h2>НАСТРОЙКИ</h2>${[["notifications","Уведомления"],["sounds","Звуки"],["animations","Анимации"],["mock_ai","Mock AI"]].map(([k,n])=>`<div class=row><label>${n}<input type=checkbox data-setting="${k}" ${x[k]?"checked":""}></label></div>`).join("")}<div class=actions><button class=secondary id=export>Экспорт данных</button><button class=secondary id=import>Импорт данных</button></div><button id=clear class=secondary>Очистить данные</button><input id=import-file type=file accept=application/json hidden><p class=muted>Animal Collector · локальное хранение на устройстве.</p></section>`}
+function trade(){return `<section class=panel><h2>ОБМЕН ПО BLUETOOTH</h2><p class=muted>Выберите карточку и доплату лапками. Получатель увидит ценность сделки и сам подтвердит добавление карточки.</p><select id=trade-card><option value="">Выберите карточку</option>${state.cards.filter(c=>c.state!=="LOST").map(c=>`<option value="${c.id}">${esc(c.name)} · ${c.score}</option>`).join("")}</select><label>Доплата лапками<input id=trade-paws type=number min=0 value=0></label><button id=find-player>НАЙТИ СОПРЯЖЁННОЕ УСТРОЙСТВО</button><div id=trade-devices></div></section>`}
+function cardDetail(id){let c=state.cards.find(x=>x.id===id);if(!c)return home();return `<section class="panel flip"><button class=secondary data-page=collection>← Коллекция</button>${c.image?`<img class="detail-photo" src="${esc(c.image)}" alt="${esc(c.name)}">`:""}<h2>${esc(c.name)} <small>№${c.number}</small></h2><p class="rarity">Коллекционная редкость: ${rankName(c.rarity)} · SCORE ${c.score}</p><div class=card><p><b>${esc(c.species)}</b> · ${esc(c.breed)} · ${esc(c.color)}</p><p>${esc(c.description)}</p><p class=muted>${esc(c.scientific)} · ${esc(c.family)} · confidence ${c.confidence}%</p><p class=muted>Дата: ${new Date(c.created_at).toLocaleDateString("ru-RU")} · Серия: ${esc(c.series)}</p><button id=wiki>О ЖИВОТНОМ — Wikipedia</button></div>${c.state==="OUT_OF_BAG"?`<p class=warning>⚠️ Карточка находится вне сумки. До потери: ${remaining(c.expires_at)}</p>`:""}${c.protected?"<p>🛡 ЗАЩИЩЕНА</p>":c.state==="OUT_OF_BAG"?`<button data-protect="${c.id}">ЗАЩИТИТЬ КАРТОЧКУ · 40 лапок</button>`:""}</section>`}
+function render(){nav.innerHTML=[["home","Главная"],["collection","Коллекция"],["bag","Сумка"],["albums","Альбомы"],["achievements","Достижения"],["statistics","Статистика"],["trade","Обмен"],["settings","Настройки"]].map(x=>navButton(...x)).join("");view.innerHTML=page.startsWith("card:")?cardDetail(+page.split(":")[1]):({home,collection,bag,albums:()=>progress("АЛЬБОМЫ",state.albums)+progress("СЕРИИ",state.series),achievements:()=>progress("ДОСТИЖЕНИЯ",state.achievements),statistics,trade,settings}[page]||home)();if(page==="collection")fillCollection();bind()}
+function bind(){document.querySelectorAll("[data-page]").forEach(x=>x.onclick=()=>{page=x.dataset.page;render()});document.querySelectorAll("[data-card]").forEach(x=>x.onclick=()=>{page=`card:${x.dataset.card}`;render()});document.querySelectorAll("[data-capture]").forEach(x=>x.onclick=()=>capture(x.dataset.capture));document.querySelectorAll("[data-slot]").forEach(x=>x.onclick=()=>action({type:"buy_slot",rarity:x.dataset.slot}));document.querySelectorAll("[data-protect]").forEach(x=>x.onclick=()=>action({type:"protect",id:+x.dataset.protect}));document.querySelectorAll("[data-claim]").forEach(x=>x.onclick=()=>action({type:"claim_achievement",name:x.dataset.claim}));document.querySelectorAll("[data-setting]").forEach(x=>x.onchange=()=>action({type:"settings",key:x.dataset.setting,value:x.checked}));["search","sort","category","rarity"].forEach(id=>document.querySelector(`#${id}`)?.addEventListener("input",fillCollection));document.querySelector("#wiki")?.addEventListener("click",()=>{let c=state.cards.find(x=>x.id===+page.split(":")[1]);window.open(`https://ru.wikipedia.org/w/index.php?search=${encodeURIComponent(c.search||c.species)}`,"_blank")});document.querySelector("#clear")?.addEventListener("click",()=>{if(confirm("Удалить все локальные карточки и прогресс?"))action({type:"clear"})});document.querySelector("#export")?.addEventListener("click",async()=>{let a=document.createElement("a");a.href=URL.createObjectURL(new Blob([await callPython("export_state")],{type:"application/json"}));a.download="animal-collector-backup.json";a.click();URL.revokeObjectURL(a.href)});document.querySelector("#import")?.addEventListener("click",()=>document.querySelector("#import-file").click());document.querySelector("#import-file")?.addEventListener("change",async e=>{try{state=parse(await callPython("import_state",await e.target.files[0].text()));await persist();render()}catch(err){message("Не удалось импортировать резервную копию.")}})}
+async function capture(source){try{if(source==="gallery"){if(!await action({type:"gallery_check"}))return;if(!window.NativeDevice)return message("Выбор фотографии доступен только в Android-приложении.");pendingSource="gallery";window.NativeDevice.pickPhoto()}else{if(!window.NativeDevice)return message("Камера доступна только в Android-приложении.");pendingSource="camera";window.NativeDevice.takePhoto()}}catch(e){showError("capture",e)}}
+window.onNativePhoto=async (dataUrl)=>{if(!dataUrl){pendingSource="";return message("Фотография не получена. Попробуйте ещё раз.")}if(pendingSource==="gallery"&&!await action({type:"gallery_start"})){pendingSource="";return}pendingSource="";pendingImage=dataUrl;try{recognition=parse(await callPython("mock_results",dataUrl));page="recognition";view.innerHTML=`<section class=panel><img class=detail-photo src="${esc(dataUrl)}" alt="Выбранная фотография"><h2>Результат распознавания</h2><p class=muted>Выберите наиболее подходящий вариант.</p>${recognition.map((r,i)=>`<button class=choice data-choice=${i}><b>${esc(r.breed)}</b> — ${r.confidence}%<br><small>${esc(r.species)} · ${esc(r.color)}</small></button>`).join("")}</section>`;document.querySelectorAll("[data-choice]").forEach(b=>b.onclick=()=>nameCard(recognition[+b.dataset.choice]))}catch(e){showError("recognition",e)}};
+function nameCard(result){view.innerHTML=`<section class=panel><h2>Как назвать это животное?</h2><img class=detail-photo src="${esc(pendingImage)}" alt="Фотография животного"><p>${esc(result.species)} · ${esc(result.breed)}</p><label>Имя животного<input id=animal-name maxlength=50 required></label><button id=create>СОЗДАТЬ КАРТОЧКУ</button></section>`;document.querySelector("#create").onclick=async()=>{let name=document.querySelector("#animal-name").value;if(await action({type:"create_card",name,result,image:pendingImage})){page="collection";render();message("Карточка получена и сохранена в коллекции!")}}}
+window.onNativeCameraPermission=granted=>{if(!granted)message("Доступ к камере не предоставлен. Выберите фото из галереи.")};
+window.onBluetoothDevices=(devices)=>{let target=document.querySelector("#trade-devices");if(!target)return;target.innerHTML=devices.length?devices.map(d=>`<button class=choice data-device="${esc(d.address)}">Отправить: ${esc(d.name||d.address)}</button>`).join(""):"<p class=muted>Нет сопряжённых устройств. Сначала выполните сопряжение в настройках Android.</p>";target.querySelectorAll("[data-device]").forEach(button=>button.onclick=()=>{let card=state.cards.find(c=>c.id===+document.querySelector("#trade-card").value),paws=Math.max(0,+document.querySelector("#trade-paws").value||0);if(!card)return message("Выберите карточку для обмена.");if(!window.NativeDevice)return message("Bluetooth доступен только в Android-приложении.");window.NativeDevice.sendTrade(button.dataset.device,JSON.stringify({card,pay_paws:paws,value:card.score+paws}))})};
+window.onBluetoothTrade=async (payload)=>{try{let offer=parse(payload),card=offer.card;if(!card)return;let accepted=confirm(`Получена карточка «${card.name}». Ценность: ${offer.value}. Доплата: ${offer.pay_paws||0} лапок. Принять сделку?`);if(accepted && (await action({type:"receive_trade_card",card,pay_paws:offer.pay_paws||0})))message("Карточка получена по Bluetooth и помещена в коллекцию.")}catch(e){message("Получены повреждённые данные сделки.")}};
+window.onBluetoothStatus=(text)=>message(text);
+document.addEventListener("click",event=>{if(event.target.id==="find-player"){if(window.NativeDevice)window.NativeDevice.listTradeDevices();else message("Bluetooth доступен только в Android-приложении.")}});
+async function secretHash(value){let bytes=new TextEncoder().encode(value);let digest=await crypto.subtle.digest("SHA-256",bytes);return [...new Uint8Array(digest)].map(x=>x.toString(16).padStart(2,"0")).join("")}
+function showAccount(account){document.querySelector("#game").hidden=false;nav.replaceChildren();view.innerHTML=`<section class="panel"><h2>${account?"Вход в локальную учётную запись":"Создайте локальную учётную запись"}</h2><p class="muted">Данные и пароль остаются только на этом устройстве.</p><label>Имя исследователя<input id="account-name" maxlength="40" ${account?`value="${esc(account.name)}" readonly`:"required"}></label><label>Пароль<input id="account-password" type="password" minlength="4" required autocomplete="current-password"></label><button id="account-submit">${account?"ВОЙТИ":"СОЗДАТЬ УЧЁТНУЮ ЗАПИСЬ"}</button></section>`;document.querySelector("#account-submit").onclick=async()=>{let name=document.querySelector("#account-name").value.trim(),password=document.querySelector("#account-password").value;if(password.length<4)return message("Пароль должен содержать не менее 4 символов.");let hash=await secretHash(password);if(account&&hash!==account.hash)return message("Неверный пароль.");if(!account){account={name:name||"Исследователь",hash};localStorage.setItem("animal-collector-account",JSON.stringify(account));await action({type:"rename_profile",name:account.name})}status.textContent=`Выполнен вход: ${account.name}`;render()}}
+async function boot(){try{status.textContent="Загрузка игрового движка…";pyodide=await loadPyodide({indexURL:"https://cdn.jsdelivr.net/pyodide/v0.27.0/full/"});let response=await fetch("engine.py");if(!response.ok)throw Error("source");await pyodide.runPythonAsync(await response.text());state=parse(await callPython("initialize",localStorage.getItem("animal-collector-state")||"{}"));showAccount(parse(localStorage.getItem("animal-collector-account")||"null"));status.textContent="Требуется вход в локальную учётную запись"}catch(e){showError("startup",e);status.textContent="Движок недоступен"}}
+window.addEventListener("pagehide",()=>persist().catch(()=>{}));boot();
