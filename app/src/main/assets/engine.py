@@ -10,12 +10,12 @@ RARITIES = ("COMMON", "UNCOMMON", "RARE", "EPIC", "LEGENDARY")
 CAPACITY = {rarity: 5 for rarity in RARITIES}
 OUT_OF_BAG_MS = 24 * 60 * 60 * 1000
 PROTECT_COST = 40
-SLOT_COST = 75
+RANK_POINTS = {"COMMON": 20, "UNCOMMON": 45, "RARE": 90, "EPIC": 180, "LEGENDARY": 360}
 
 DEFAULT = {"profile": "Исследователь", "points": 120, "xp": 0, "level": 1,
            "cards": [], "capacities": CAPACITY, "settings": {"mock_ai": True,
            "notifications": True, "animations": True, "sounds": False}, "trades": 0,
-           "gallery_day": "", "gallery_count": 0, "next_id": 1}
+           "gallery_day": "", "gallery_count": 0, "next_id": 1, "claimed_achievements": []}
 _state = {}
 
 MOCK_RESULTS = [
@@ -63,7 +63,8 @@ def _normalize(data):
 def _achievements():
     cards = _state["cards"]; active = [c for c in cards if c["state"] != "LOST"]
     definitions = [("Первое открытие", "Получите первую карточку", 1, 25, len(active)), ("Кошатник", "Соберите 5 кошек", 5, 50, sum(c["category"] == "Кошки" for c in active)), ("Собачник", "Соберите 5 собак", 5, 50, sum(c["category"] == "Собаки" for c in active)), ("Орнитолог", "Соберите 3 птицы", 3, 60, sum(c["category"] == "Птицы" for c in active)), ("Охотник за редкостью", "Найдите редкую карточку", 1, 40, sum(c["rarity"] in ("RARE","EPIC","LEGENDARY") for c in active)), ("Эпический момент", "Найдите EPIC", 1, 75, sum(c["rarity"] == "EPIC" for c in active)), ("Легенда", "Найдите LEGENDARY", 1, 150, sum(c["rarity"] == "LEGENDARY" for c in active)), ("Коллекционер", "Соберите 10 карточек", 10, 100, len(active)), ("Исследователь", "Откройте 5 видов", 5, 80, len({c["species"] for c in active})), ("Безумный коллекционер", "Соберите 50 карточек", 50, 250, len(active))]
-    return [{"name":n,"description":d,"target":t,"progress":min(p,t),"reward":r,"done":p>=t} for n,d,t,r,p in definitions]
+    claimed = set(_state.get("claimed_achievements", []))
+    return [{"name":n,"description":d,"target":t,"progress":min(p,t),"reward":r,"done":p>=t,"claimed":n in claimed} for n,d,t,r,p in definitions]
 def _albums():
     cards = [c for c in _state["cards"] if c["state"] != "LOST"]
     return [{"name":n,"target":t,"progress":min(sum(c["category"] == n for c in cards),t)} for n,t in (("Кошки",50),("Собаки",50),("Птицы",30),("Дикие животные",40),("Насекомые",25))] + [{"name":"Редкие породы","target":20,"progress":min(sum(c["rarity"] in ("RARE","EPIC","LEGENDARY") for c in cards),20)}]
@@ -94,21 +95,29 @@ def dispatch(payload):
         cid = int(_state["next_id"]); score = _score(f"{cid}:{name}:{result['species']}:{_now()}"); rarity = _rarity(score); counts = _bag_counts()
         card = {"id":cid,"number":cid,"name":name[:50],"image":image,"score":score,"rarity":rarity,"state":"IN_BAG" if counts[rarity] < _state["capacities"][rarity] else "OUT_OF_BAG","protected":False,"created_at":_now(),"expires_at":0,**{k:result.get(k,"") for k in required},"age":result.get("age","") ,"search":result.get("search",result["species"])}
         if card["state"] == "OUT_OF_BAG": card["expires_at"] = _now() + OUT_OF_BAG_MS
-        bonus = _new_bonus(card); _state["cards"].append(card); _state["next_id"] = cid + 1; _state["points"] += 10 + score // 30; _state["xp"] += bonus
+        bonus = _new_bonus(card); _state["cards"].append(card); _state["next_id"] = cid + 1; _state["points"] += RANK_POINTS[rarity]; _state["xp"] += bonus
     elif kind == "buy_slot":
         rarity = action.get("rarity")
         if rarity not in RARITIES: raise ValueError("Неизвестный ранг")
-        if _state["points"] < SLOT_COST: raise ValueError("Недостаточно Points для покупки слота")
-        _state["points"] -= SLOT_COST; _state["capacities"][rarity] += 1
+        slot_cost = RANK_POINTS[rarity] * 2
+        if _state["points"] < slot_cost: raise ValueError("Недостаточно лапок для покупки слота")
+        _state["points"] -= slot_cost; _state["capacities"][rarity] += 1
     elif kind == "protect":
         card = next((c for c in _state["cards"] if c["id"] == action.get("id")), None)
         if not card: raise ValueError("Карточка не найдена")
-        if _state["points"] < PROTECT_COST: raise ValueError("Недостаточно Points для защиты карточки")
+        if _state["points"] < PROTECT_COST: raise ValueError("Недостаточно лапок для защиты карточки")
         if not card["protected"]: _state["points"] -= PROTECT_COST; card["protected"] = True
     elif kind == "settings":
         key = action.get("key")
         if key not in _state["settings"]: raise ValueError("Неизвестная настройка")
         _state["settings"][key] = bool(action.get("value"))
+    elif kind == "claim_achievement":
+        name = str(action.get("name", ""))
+        achievement = next((item for item in _achievements() if item["name"] == name), None)
+        if not achievement or not achievement["done"]: raise ValueError("Задание ещё не выполнено")
+        if achievement["claimed"]: raise ValueError("Награда за это задание уже получена")
+        _state.setdefault("claimed_achievements", []).append(name)
+        _state["points"] += achievement["reward"]
     elif kind == "clear":
         _state = _normalize({})
     else: raise ValueError("Это действие сейчас недоступно")
