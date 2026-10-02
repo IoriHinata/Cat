@@ -9,7 +9,7 @@
 3. Запустите конфигурацию `app` на устройстве Android 8.0+ (API 26).
 4. Для сборки выполните `gradle :app:assembleDebug` (либо используйте Android Studio).
 
-Проект использует тонкий Kotlin Android-хост и WebView. UI и прикладная логика находятся в `app/src/main/assets/`: HTML/CSS/JavaScript рисуются в WebView, а `engine.py` загружается через `fetch` и выполняется Pyodide. Разрешение камеры запрашивается только по действию пользователя через ограниченный Android API-мост.
+Проект использует тонкий Java Android-хост и WebView. UI и прикладная логика находятся в `app/src/main/assets/`: HTML/CSS/JavaScript рисуются в WebView, а `engine.py` загружается через `fetch` и выполняется Pyodide. Разрешение камеры запрашивается только по действию пользователя через ограниченный Android API-мост.
 
 ### Python и WebView
 
