@@ -7,7 +7,7 @@
 1. Откройте корневую папку в Android Studio Ladybug или новее.
 2. Выберите JDK 17, установите Android SDK Platform 35 и синхронизируйте Gradle.
 3. Запустите конфигурацию `app` на устройстве Android 8.0+ (API 26).
-4. Для проверок выполните `./gradlew testDebugUnitTest`.
+4. Для проверок выполните `gradle testDebugUnitTest` (либо используйте Android Studio).
 
 Проект использует Kotlin, Jetpack Compose/Material 3, Navigation-ready single activity, Room, DataStore dependency, Coroutines/StateFlow-compatible data layer, CameraX dependencies и системный Android Photo Picker. Разрешение камеры запрашивается только при нажатии соответствующей кнопки. Gallery picker ограничен двумя импортами в локальный календарный день; состояние счётчика хранится в Room.
 
@@ -41,3 +41,13 @@ Unit-тесты покрывают score/rank, цены и недостаток 
 * **VERSION 2.1:** синхронизация коллекции.
 * **VERSION 2.2:** онлайн-рынок.
 * **VERSION 3.0:** события и глобальные коллекции.
+
+## APK через GitHub Actions
+
+После push в ветку `work`/`main`, pull request или ручного запуска workflow **Build Android APK** GitHub Actions запускает unit-тесты, собирает `assembleDebug` на JDK 17 и публикует `animal-collector-debug-apk` как artifact на 14 дней. APK можно скачать на странице **Actions → нужный запуск → Artifacts**.
+
+## Локальный профиль и хранение
+
+В разделе **Ещё → Настройки и резервная копия** создаётся локальный профиль исследователя. Имя сохраняется в DataStore, а все данные карточки — UUID, имя, URI фото, вид, научное название, семейство, порода, окрас, confidence, описание, Wikipedia query, score, редкость, дата и статус — записываются в локальную Room-базу телефона. В приложении нет Google-входа, облачного аккаунта или сетевой передачи карточек.
+
+Важно: стандарт Android удаляет данные приложения при его удалении. Поэтому локальное хранение гарантирует сохранность между перезапусками и обновлениями приложения, но не может восстановить данные после uninstall без отдельной экспортной копии. Это поведение явно показывается на экране локального профиля.
