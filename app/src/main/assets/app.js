@@ -14,14 +14,21 @@ function showError(stage, error) {
 
 // The only JS ↔ Python adapter. Arguments and return values are JSON strings.
 async function callPython(name, ...args) {
+  let fn;
+  let result;
   try {
-    const fn = pyodide.globals.get(name);
+    fn = pyodide.globals.get(name);
     if (!fn) throw new Error(`Python API '${name}' не экспортирован`);
-    const result = await fn(...args);
+    result = await fn(...args);
     return typeof result === "string" ? result : result.toString();
   } catch (error) {
     showError(`вызов Python-функции ${name}`, error);
     throw error;
+  } finally {
+    // Pyodide globals and non-primitive return values are PyProxy objects.
+    // Release them after converting the JSON response to avoid leaking proxies.
+    if (result && typeof result.destroy === "function") result.destroy();
+    if (fn && typeof fn.destroy === "function") fn.destroy();
   }
 }
 
@@ -40,7 +47,16 @@ function render(state) {
   }));
 }
 
-async function dispatch(action) { render(parseState(await callPython("dispatch", JSON.stringify(action)))); }
+async function persistState() {
+  try {
+    localStorage.setItem("animal-collector-state", await callPython("export_state"));
+  } catch (_) { /* The bridge already displays the stage-specific error. */ }
+}
+
+async function dispatch(action) {
+  render(parseState(await callPython("dispatch", JSON.stringify(action))));
+  await persistState();
+}
 
 window.onNativeCameraPermission = (granted) => {
   status.textContent = granted ? "Камера разрешена Android" : "Доступ к камере не предоставлен";
@@ -77,6 +93,6 @@ document.querySelector("#camera").addEventListener("click", () => {
   else status.textContent = "Android API камеры доступен только внутри приложения";
 });
 window.addEventListener("pagehide", async () => {
-  try { localStorage.setItem("animal-collector-state", await callPython("export_state")); } catch (_) { /* Reported by callPython. */ }
+  await persistState();
 });
 boot();
