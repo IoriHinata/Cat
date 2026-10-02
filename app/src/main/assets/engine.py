@@ -118,6 +118,16 @@ def dispatch(payload):
         if achievement["claimed"]: raise ValueError("Награда за это задание уже получена")
         _state.setdefault("claimed_achievements", []).append(name)
         _state["points"] += achievement["reward"]
+    elif kind == "receive_trade_card":
+        remote = action.get("card")
+        if not isinstance(remote, dict) or not remote.get("species") or not remote.get("name"):
+            raise ValueError("Получены неполные данные карточки")
+        pay = max(0, int(action.get("pay_paws", 0)))
+        if _state["points"] < pay: raise ValueError("Недостаточно лапок для этой сделки")
+        cid = int(_state["next_id"]); score = max(5, min(1000, int(remote.get("score", 5)))); rarity = _rarity(score); counts = _bag_counts()
+        card = {"id":cid,"number":cid,"name":str(remote["name"])[:50],"image":str(remote.get("image", "")),"score":score,"rarity":rarity,"state":"IN_BAG" if counts[rarity] < _state["capacities"][rarity] else "OUT_OF_BAG","protected":False,"created_at":_now(),"expires_at":0,"species":str(remote["species"]),"scientific":str(remote.get("scientific", "")),"family":str(remote.get("family", "")),"breed":str(remote.get("breed", "")),"color":str(remote.get("color", "")),"confidence":int(remote.get("confidence", 0)),"description":str(remote.get("description", "")),"category":str(remote.get("category", "Другие")),"series":str(remote.get("series", "")),"age":str(remote.get("age", "")),"search":str(remote.get("search", remote["species"]))}
+        if card["state"] == "OUT_OF_BAG": card["expires_at"] = _now() + OUT_OF_BAG_MS
+        _state["cards"].append(card); _state["next_id"] = cid + 1; _state["points"] -= pay
     elif kind == "clear":
         _state = _normalize({})
     else: raise ValueError("Это действие сейчас недоступно")
