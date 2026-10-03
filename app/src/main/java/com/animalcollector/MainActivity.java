@@ -191,7 +191,8 @@ public final class MainActivity extends ComponentActivity {
         }
         try {
             java.io.ByteArrayOutputStream bytes = new java.io.ByteArrayOutputStream();
-            bitmap.compress(Bitmap.CompressFormat.JPEG, 82, bytes);
+            // Keep the image suitable for the full-size card and Bluetooth transfer.
+            bitmap.compress(Bitmap.CompressFormat.JPEG, 98, bytes);
             publishPhoto("data:image/jpeg;base64," + Base64.encodeToString(bytes.toByteArray(), Base64.NO_WRAP));
         } catch (RuntimeException exception) {
             publishPhoto(null);

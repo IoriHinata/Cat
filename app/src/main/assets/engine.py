@@ -128,6 +128,10 @@ def dispatch(payload):
         card = {"id":cid,"number":cid,"name":str(remote["name"])[:50],"image":str(remote.get("image", "")),"score":score,"rarity":rarity,"state":"IN_BAG" if counts[rarity] < _state["capacities"][rarity] else "OUT_OF_BAG","protected":False,"created_at":_now(),"expires_at":0,"species":str(remote["species"]),"scientific":str(remote.get("scientific", "")),"family":str(remote.get("family", "")),"breed":str(remote.get("breed", "")),"color":str(remote.get("color", "")),"confidence":int(remote.get("confidence", 0)),"description":str(remote.get("description", "")),"category":str(remote.get("category", "Другие")),"series":str(remote.get("series", "")),"age":str(remote.get("age", "")),"search":str(remote.get("search", remote["species"]))}
         if card["state"] == "OUT_OF_BAG": card["expires_at"] = _now() + OUT_OF_BAG_MS
         _state["cards"].append(card); _state["next_id"] = cid + 1; _state["points"] -= pay
+    elif kind == "sell_card":
+        card = next((item for item in _state["cards"] if item["id"] == action.get("id")), None)
+        if not card or card["state"] == "LOST": raise ValueError("Карточка недоступна для продажи")
+        _state["cards"].remove(card); _state["points"] += max(1, RANK_POINTS[card["rarity"]] // 4)
     elif kind == "clear":
         _state = _normalize({})
     else: raise ValueError("Это действие сейчас недоступно")
